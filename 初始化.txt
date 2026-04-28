@@ -1,0 +1,114 @@
+/*
+配置初始化
+1、对流程图变量进行初始化处理
+2、全局的日志级别设置，默认级别为2
+3、对流程图变量(g_dicConfigData)自定义拼装字典数据，供主流程图全局使用（子流程需要输入才可使用）
+4.流程运行前关闭浏览器和Excel应用
+5.配置台账和日报的名称，并检查文件是否存在
+*/
+Dim objExcelWorkBook, iRowsCount, arrayRet, valueName, valueData, logLevel, maxRetryNumber, arrAppName, bRet, dTime, year, date_MD, date_YMD
+Dim config = {}             //配置信息，配置表获取数据
+Dim sheetsName = ["全局设置","邮箱设置","文件设置"] //配置文件sheet
+
+
+
+Log.Info("全局变量初始化和关闭程序")
+// 首次运行流程对最大重试次数和当前重试次数初始化默认值
+If g_iRetryNum = ""
+	g_iRetryNum = 0                //当前重试次数
+	g_maxRetryNum = 3          //最大重试次数
+End If
+App.Kill("Excel.exe")   // 关闭Excel
+
+
+Rem 打开参数表，获取数据
+Log.Info("开始读取配置文件config中信息")
+objExcelWorkBook = Excel.OpenExcel('''E:\来也RPA\在库在途\在库在途流程数据配置文件.xlsx''',True,"Excel","","")
+// objExcelWorkBook = Excel.OpenExcel('''C:\Users\wzw\Desktop\在库在途\Data\在库在途流程数据配置文件.xlsx''',True,"Excel","","")
+Delay(1000)
+// 获取数据
+For Each sheetName In sheetsName
+	iRowsCount = Excel.GetRowsCount(objExcelWorkBook,sheetName)
+	
+	If iRowsCount > 1
+		arrayRet = Excel.ReadRange(objExcelWorkBook,sheetName,"A2:B"&iRowsCount,True)
+		config[sheetName] = {}
+		For Each value In arrayRet
+			valueName = Trim(value[0]," ")
+			valueData = Trim(value[1]," ")
+			If valueName <> ""
+				config[sheetName][valueName] = valueData
+			End If  
+		Next
+	Else
+		Log.Warn("配置文件Config.xlsx的["&sheetName&"]工作表无配置信息！")
+		
+	End If    
+Next
+Excel.CloseExcel(objExcelWorkBook,True)
+
+
+Log.Info("设置日志级别、最大重试次数和更新订单号")
+// 初始化日志级别
+If config["全局设置"]["LogLevel"]<>""
+	logLevel = CInt(config["全局设置"]["LogLevel"])
+End If
+
+If (IsNull(logLevel)) Or (logLevel = "")
+	logLevel = 2
+End If
+
+If (logLevel < 0 ) Or (logLevel > 3)
+	logLevel = 2
+End If
+Log.SetLevel(logLevel)
+
+
+// 初始化最大重试次数
+maxRetryNumber = CInt(config["全局设置"]["MaxRetryNumber"])
+If maxRetryNumber<>0
+	// maxRetryNumber为0情况，说明表格中填写0或者未填写
+	g_maxRetryNum = maxRetryNumber
+End If
+
+
+Log.Info("关闭应用程序")
+arrAppName = Split(config["全局设置"]["appsName"],",")
+For Each appName In arrAppName
+	bRet=App.GetStatus(appName) 
+	If bRet
+		App.Kill(appName)
+	End If
+	
+Next 
+
+
+// 配置所使用文件的文件名称
+Log.Info("根据日期设置文件名称")
+dTime = Time.Date()
+
+
+year = Time.Year(dTime)-2000    // 获取年份后两个数字--23
+date_YMD = Time.Format(dTime,"yyyy-mm-dd")    // 年月日---2023-01-02
+
+config["文件设置"]["zaiKuExcel"]  = "ecs_库存明细"&date_YMD&".xlsx" // 在库表命名---在库表通过邮件下载，后使用当前命名规则重命名
+config["文件设置"]["zaiTuExcel"]  = "ecs_采购在途new"&date_YMD&".xlsx"  // 在途表命名---在途表通过邮件下载，后使用当前命名规则重命名
+config["文件设置"]["diaohuoExcel"]  = "ecs_调货成本在途new"&date_YMD&".xlsx"  // 调货表命名---调货表通过邮件下载，后使用当前命名规则重命名
+config["文件设置"]["projectListExcel"]  = "项目审批（已办）"&date_YMD&".xlsx" // 项目审批表命名---项目审批表通过邮件下载，后使用当前命名规则重命名
+config["文件设置"]["orderDetailsExcel"]  = date_YMD&" 订单明细.xlsx"    // 订单明细表 ----用于获取订单明细表中订单号、最早预计备货完成时间、最晚预计备货完成时间、实际发货时间、是否全部发货、运输方式、订单状态
+config["文件设置"]["orderDetailsPath"] = config["文件设置"]["OrderDetailsPath"]&"\\"&date_YMD // 订单明细表存放路径
+
+
+// 修改文件保存路径，创建日期命名的文件夹
+config["文件设置"]["FileSavePath"] = config["文件设置"]["FileSavePath"]&"\\"&date_YMD
+bRet = File.FolderExists(config["文件设置"]["FileSavePath"])
+If bRet=False
+	File.CreateFolder(config["文件设置"]["FileSavePath"])
+End If
+
+
+g_dicConfigData=config
+
+TracePrint(g_dicConfigData["全局设置"]["ProductName"])
+
+
